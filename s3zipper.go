@@ -37,6 +37,7 @@ type RedisFile struct {
 	FileName string
 	Folder   string
 	S3Path   string
+	WebURL   string
 	// Optional - we use are Teamwork.com but feel free to rmove
 	FileId       int64 `json:",string"`
 	ProjectId    int64 `json:",string"`
@@ -138,7 +139,7 @@ func getFilesFromRedis(ref string) (files []*RedisFile, err error) {
 	defer redis.Close()
 
 	// Get the value from Redis
-	result, err := redis.Do("GET", "zip:"+ref)
+	result, err := redis.Do("GET", "gss-downloads:"+ref)
 	if err != nil || result == nil {
 		err = errors.New("Access Denied (sorry your link has timed out)")
 		return
@@ -206,29 +207,42 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// Loop over files, add them to the
 	zipWriter := zip.NewWriter(w)
 	for _, file := range files {
-
-		if file.S3Path == "" {
-			log.Printf("Missing path for file: %v", file)
-			continue
-		}
-
+		var rdr io.ReadCloser
 		// Build safe file file name
 		safeFileName := makeSafeFileName.ReplaceAllString(file.FileName, "")
 		if safeFileName == "" { // Unlikely but just in case
 			safeFileName = "file"
 		}
 
-		// Read file from S3, log any errors
-		rdr, err := aws_bucket.GetReader(file.S3Path)
-		if err != nil {
-			switch t := err.(type) {
-			case *s3.Error:
-				if t.StatusCode == 404 {
-					log.Printf("File not found. %s", file.S3Path)
+		if file.S3Path != "" {
+			// Read file from S3, log any errors
+			rdr, err = aws_bucket.GetReader(file.S3Path)
+			if err != nil {
+				switch t := err.(type) {
+				case *s3.Error:
+					if t.StatusCode == 404 {
+						log.Printf("File not found. %s", file.S3Path)
+					}
+				default:
+					log.Printf("Error downloading \"%s\" - %s", file.S3Path, err.Error())
 				}
-			default:
-				log.Printf("Error downloading \"%s\" - %s", file.S3Path, err.Error())
+				continue
 			}
+		} else if file.WebURL != "" {
+			resp, err := http.Get(file.WebURL)
+			if err != nil {
+				log.Printf("Error downloading \"%s\" - %s", file.WebURL, err.Error())
+			}
+			defer resp.Body.Close()
+
+			// Check server response
+			if resp.StatusCode != http.StatusOK {
+				log.Printf("Error downloading \"%s\" - %s", file.WebURL, err.Error())
+			}
+
+			rdr = resp.Body
+		} else {
+			log.Printf("Missing path for file: %v", file)
 			continue
 		}
 
