@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,14 +17,15 @@ import (
 	"github.com/AdRoll/goamz/aws"
 	"github.com/AdRoll/goamz/s3"
 	redigo "github.com/garyburd/redigo/redis"
+	"github.com/kelseyhightower/envconfig"
 )
 
 type Configuration struct {
-	AccessKey          string
-	SecretKey          string
+	AccessKey          string `envconfig:"access_key"`
+	SecretKey          string `envconfig:"secret_key"`
 	Bucket             string
 	Region             string
-	RedisServerAndPort string
+	RedisServerAndPort string `envconfig:"redis_server_and_port"`
 	Port               int
 }
 
@@ -52,11 +52,9 @@ func main() {
 		return
 	}
 
-	configFile, _ := os.Open("conf.json")
-	decoder := json.NewDecoder(configFile)
-	err := decoder.Decode(&config)
+	err := envconfig.Process("zipper", &config)
 	if err != nil {
-		panic("Error reading conf")
+		log.Fatal(err.Error())
 	}
 
 	initAwsBucket()
